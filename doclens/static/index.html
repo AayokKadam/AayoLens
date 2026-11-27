@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AayoLens · Smart Document Scanner</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --surface: #ffffff;
+      --surface-2: #f8fafc;
+      --surface-3: #f1f5f9;
+      --line: #e2e8f0;
+      --line-strong: #cbd5e1;
+      --tx: #0f172a;
+      --tx-2: #334155;
+      --mut: #64748b;
+      --blue: #1a73e8;
+      --blue-hover: #1557b0;
+      --blue-soft: #e8f0fe;
+      --red: #ea4335;
+      --yellow: #fbbc04;
+      --green: #34a853;
+      --ok: #137333;
+      --ok-bg: #e6f4ea;
+      --ok-border: #ceead6;
+      --bad: #c5221f;
+      --bad-bg: #fce8e6;
+      --bad-border: #fad2cf;
+      --shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 10px 28px rgba(15, 23, 42, 0.05);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Inter", "Segoe UI", Roboto, system-ui, -apple-system, sans-serif;
+      background:
+        radial-gradient(900px 420px at 8% -5%, rgba(26, 115, 232, 0.08), transparent 60%),
+        radial-gradient(800px 400px at 92% 0%, rgba(52, 168, 83, 0.06), transparent 55%),
+        var(--bg);
+      color: var(--tx);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--line);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 20px;
+      letter-spacing: -0.02em;
+      color: var(--tx);
+    }
+
+    .brand span { color: var(--blue); }
+
+    .lens-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      display: grid;
+      place-items: center;
+      box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+      flex-shrink: 0;
+    }
+
+    .header-pill {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--tx-2);
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      padding: 6px 13px;
+      border-radius: 999px;
+    }
+
+    main {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 24px 20px 44px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.18fr);
+      gap: 22px;
+      align-items: start;
+    }
+
+    @media (max-width: 960px) {
+      main { grid-template-columns: minmax(0, 1fr); padding: 16px; gap: 16px; }
+      header { padding: 12px 16px; }
+      .header-pill { display: none; }
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 22px;
+      box-shadow: var(--shadow);
+      min-width: 0;
+    }
+
+    @media (max-width: 560px) {
+      .card { padding: 16px; border-radius: 14px; }
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .card-head h2 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+    }
+
+    .step-badge {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--blue);
+      background: var(--blue-soft);
+      padding: 4px 10px;
+      border-radius: 999px;
+    }
+
+    /* Light Google Lens Viewfinder */
+    .viewfinder {
+      position: relative;
+      border-radius: 16px;
+      background: var(--surface-2);
+      border: 1.5px dashed var(--line-strong);
+      min-height: 260px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 22px;
+      text-align: center;
+      cursor: pointer;
+      overflow: hidden;
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    @media (max-width: 560px) {
+      .viewfinder { min-height: 210px; padding: 16px; }
+    }
+
+    .viewfinder:hover,
+    .viewfinder.on,
+    .viewfinder:focus-visible {
+      outline: none;
+      border-color: var(--blue);
+      background: #f3f7fe;
+    }
+
+    .corner {
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      border-color: #94a3b8;
+      border-style: solid;
+      pointer-events: none;
+      transition: border-color 0.2s;
+    }
+    .viewfinder:hover .corner,
+    .viewfinder.on .corner,
+    .viewfinder.scanning .corner { border-color: var(--blue); }
+    .c-tl { top: 12px; left: 12px; border-width: 3px 0 0 3px; border-top-left-radius: 8px; }
+    .c-tr { top: 12px; right: 12px; border-width: 3px 3px 0 0; border-top-right-radius: 8px; }
+    .c-bl { bottom: 12px; left: 12px; border-width: 0 0 3px 3px; border-bottom-left-radius: 8px; }
+    .c-br { bottom: 12px; right: 12px; border-width: 0 3px 3px 0; border-bottom-right-radius: 8px; }
+
+    .scan-beam {
+      display: none;
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      height: 3px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--blue), var(--red), var(--yellow), var(--green));
+      box-shadow: 0 0 14px rgba(26, 115, 232, 0.55);
+      animation: lensSweep 1.5s ease-in-out infinite;
+      z-index: 4;
+      pointer-events: none;
+    }
+    .viewfinder.scanning .scan-beam { display: block; }
+
+    @keyframes lensSweep {
+      0% { top: 16px; opacity: 0.9; }
+      50% { top: calc(100% - 20px); opacity: 1; }
+      100% { top: 16px; opacity: 0.9; }
+    }
+
+    .drop-prompt {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      color: var(--mut);
+      max-width: 300px;
+    }
+
+    .drop-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: var(--blue-soft);
+      display: grid;
+      place-items: center;
+      color: var(--blue);
+    }
+
+    .drop-prompt strong { color: var(--tx); font-size: 14.5px; }
+    .drop-prompt span { font-size: 12.5px; }
+
+    #preview {
+      max-width: 100%;
+      max-height: 340px;
+      border-radius: 10px;
+      display: none;
+      object-fit: contain;
+      z-index: 2;
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+    }
+
+    .pdf-badge {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding: 18px 22px;
+      border-radius: 12px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      z-index: 2;
+      max-width: 100%;
+      word-break: break-word;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font-size: 13.5px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: transform 0.1s, background 0.15s, border-color 0.15s, opacity 0.15s;
+    }
+    button:active:not(:disabled) { transform: scale(0.98); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-primary {
+      background: var(--blue);
+      color: #fff;
+      flex: 1 1 170px;
+      box-shadow: 0 4px 12px rgba(26, 115, 232, 0.24);
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--blue-hover); }
+
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--tx-2);
+      border: 1px solid var(--line-strong);
+    }
+    .btn-secondary:hover:not(:disabled) { background: var(--surface-2); border-color: var(--blue); color: var(--blue); }
+
+    .btn-copy {
+      background: var(--surface-2);
+      color: var(--tx-2);
+      border: 1px solid var(--line-strong);
+      padding: 6px 12px;
+      font-size: 12.5px;
+      border-radius: 999px;
+    }
+    .btn-copy:hover:not(:disabled) { border-color: var(--blue); color: var(--blue); background: var(--blue-soft); }
+    .btn-copy.copied { border-color: var(--ok-border); color: var(--ok); background: var(--ok-bg); }
+
+    .status-bar {
+      margin-top: 14px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      font-size: 13px;
+      color: var(--tx-2);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 42px;
+      word-break: break-word;
+    }
+    .status-bar.error { background: var(--bad-bg); border-color: var(--bad-border); color: var(--bad); }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .chip {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--surface-3);
+      border: 1px solid var(--line);
+      color: var(--tx-2);
+    }
+    .chip.ok { color: var(--ok); border-color: var(--ok-border); background: var(--ok-bg); }
+
+    .field-list { display: flex; flex-direction: column; gap: 10px; }
+
+    .row {
+      display: grid;
+      grid-template-columns: 140px minmax(0, 1fr) 28px 34px;
+      gap: 8px;
+      align-items: center;
+    }
+
+    @media (max-width: 560px) {
+      .row { grid-template-columns: minmax(0, 1fr) 28px 34px; gap: 6px; }
+      .row label { grid-column: 1 / -1; margin-top: 4px; }
+    }
+
+    .row label {
+      color: var(--mut);
+      font-size: 12.5px;
+      font-weight: 600;
+    }
+
+    input, textarea {
+      width: 100%;
+      min-width: 0;
+      background: var(--surface-2);
+      border: 1px solid var(--line-strong);
+      color: var(--tx);
+      border-radius: 10px;
+      padding: 9px 12px;
+      font-size: 13.5px;
+      font-family: inherit;
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    }
+    input:focus, textarea:focus {
+      outline: none;
+      background: var(--surface);
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.14);
+    }
+
+    .badge {
+      font-size: 12px;
+      font-weight: 700;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+    }
+    .badge.ok { color: var(--ok); background: var(--ok-bg); border: 1px solid var(--ok-border); }
+    .badge.bad { color: var(--bad); background: var(--bad-bg); border: 1px solid var(--bad-border); }
+
+    .icon-copy {
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      border-radius: 9px;
+      background: var(--surface);
+      border: 1px solid var(--line-strong);
+      color: var(--mut);
+    }
+    .icon-copy:hover { color: var(--blue); border-color: var(--blue); background: var(--blue-soft); }
+    .icon-copy.copied { color: var(--ok); border-color: var(--ok-border); background: var(--ok-bg); }
+
+    .text-panel {
+      margin-top: 20px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+
+    .text-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .text-head h3 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 650;
+      color: var(--tx);
+    }
+
+    .text-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    #raw {
+      width: 100%;
+      min-height: 150px;
+      max-height: 280px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.6;
+      background: var(--surface-2);
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      padding: 12px;
+      color: var(--tx);
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 36px 18px;
+      color: var(--mut);
+      font-size: 13.5px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 14px;
+      background: var(--surface-2);
+    }
+
+    .meta { color: var(--mut); font-size: 12.5px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="lens-icon" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round">
+          <path d="M4 8V6a2 2 0 0 1 2-2h2" stroke="#1a73e8"/>
+          <path d="M16 4h2a2 2 0 0 1 2 2v2" stroke="#ea4335"/>
+          <path d="M20 16v2a2 2 0 0 1-2 2h-2" stroke="#34a853"/>
+          <path d="M8 20H6a2 2 0 0 1-2-2v-2" stroke="#fbbc04"/>
+          <circle cx="12" cy="12" r="3.2" stroke="#0f172a"/>
+        </svg>
+      </div>
+      <div>Aayo<span>Lens</span></div>
+    </div>
+    <div class="header-pill">OCR + AI Document Extractor · Drop, Paste or Capture</div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="card-head">
+        <h2>Document Viewfinder</h2>
+        <span class="step-badge">1 · Capture</span>
+      </div>
+
+      <div id="drop" class="viewfinder" tabindex="0" role="button" aria-label="Upload image or PDF">
+        <span class="corner c-tl"></span>
+        <span class="corner c-tr"></span>
+        <span class="corner c-bl"></span>
+        <span class="corner c-br"></span>
+        <div class="scan-beam"></div>
+
+        <div id="prompt" class="drop-prompt">
+          <div class="drop-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+          </div>
+          <strong>Drop image or PDF to scan</strong>
+          <span>Click to browse, paste a screenshot (Ctrl+V), or use your camera</span>
+        </div>
+
+        <img id="preview" alt="Uploaded document preview">
+        <div id="pdfBadge" class="pdf-badge">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#1a73e8" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+          </svg>
+          <strong id="pdfName">document.pdf</strong>
+          <span class="meta" style="margin:0">PDF ready for text extraction &amp; OCR</span>
+        </div>
+      </div>
+
+      <input id="file" type="file" accept="image/*,.pdf" hidden>
+      <input id="cam" type="file" accept="image/*" capture="environment" hidden>
+
+      <div class="actions">
+        <button type="button" class="btn-secondary" onclick="$('cam').click()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          Camera
+        </button>
+        <button type="button" class="btn-secondary" onclick="$('file').click()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Choose File
+        </button>
+        <button type="button" id="clearBtn" class="btn-secondary" style="display:none">Clear</button>
+        <button type="button" id="go" class="btn-primary" disabled>Scan Document</button>
+      </div>
+
+      <div class="status-bar" id="statusBar">
+        <span id="status">Ready · Upload an Aadhaar, PAN, PDF, or any document.</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Extracted Content &amp; Text</h2>
+        <div class="text-actions">
+          <button type="button" class="btn-copy" id="copySummaryBtn" style="display:none">Copy Fields</button>
+          <span class="step-badge">2 · Results</span>
+        </div>
+      </div>
+
+      <div id="chips" class="chips" style="display:none"></div>
+      <div id="out"><div class="empty-state">Upload and scan a document to view structured fields, validation status, and copyable text.</div></div>
+
+      <div id="textPanel" class="text-panel" style="display:none">
+        <div class="text-head">
+          <h3>Extracted Text (from uploaded document)</h3>
+          <div class="text-actions">
+            <button type="button" class="btn-copy" id="copyRawBtn"></button>
+          </div>
+        </div>
+        <textarea id="raw" readonly placeholder="Extracted OCR text will appear here..."></textarea>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    let cur = null;
+    let previewUrl = null;
+
+    const COPY_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    const CHECK_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+    $("copyRawBtn").innerHTML = COPY_SVG + " Copy Text";
+
+    const LABELS = {
+      doc_type: "Document type",
+      name: "Name",
+      father_or_guardian_name: "Father / guardian",
+      dob: "Date of birth",
+      gender: "Gender",
+      address: "Address",
+      pincode: "PIN code",
+      aadhaar_number: "Aadhaar number",
+      pan_number: "PAN number",
+      summary: "Summary"
+    };
+    const VKEY = { aadhaar_number: "aadhaar", pan_number: "pan", dob: "dob", pincode: "pincode" };
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    async function copyText(text, btn, defaultHtml) {
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      btn.classList.add("copied");
+      btn.innerHTML = btn.classList.contains("icon-copy") ? CHECK_SVG : CHECK_SVG + " Copied";
+      setTimeout(() => {
+        btn.classList.remove("copied");
+        btn.innerHTML = defaultHtml;
+      }, 1500);
+    }
+
+    function clearSelection() {
+      cur = null;
+      if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
+      $("file").value = "";
+      $("cam").value = "";
+      $("preview").style.display = "none";
+      $("preview").removeAttribute("src");
+      $("pdfBadge").style.display = "none";
+      $("prompt").style.display = "flex";
+      $("clearBtn").style.display = "none";
+      $("go").disabled = true;
+      $("statusBar").classList.remove("error");
+      $("status").textContent = "Ready · Upload an Aadhaar, PAN, PDF, or any document.";
+    }
+
+    function pick(f) {
+      if (!f) return;
+      cur = f;
+      if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
+      $("go").disabled = false;
+      $("clearBtn").style.display = "inline-flex";
+      $("statusBar").classList.remove("error");
+      $("status").textContent = `Selected: ${f.name} (${Math.max(1, Math.round(f.size / 1024))} KB)`;
+      $("prompt").style.display = "none";
+
+      if (f.type.startsWith("image/")) {
+        previewUrl = URL.createObjectURL(f);
+        $("preview").src = previewUrl;
+        $("preview").style.display = "block";
+        $("pdfBadge").style.display = "none";
+      } else {
+        $("preview").style.display = "none";
+        $("pdfName").textContent = f.name;
+        $("pdfBadge").style.display = "flex";
+      }
+    }
+
+    $("drop").onclick = () => $("file").click();
+    $("drop").onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file").click(); } };
+    $("file").onchange = e => pick(e.target.files[0]);
+    $("cam").onchange = e => pick(e.target.files[0]);
+    $("clearBtn").onclick = clearSelection;
+
+    ["dragover", "dragleave", "drop"].forEach(ev => {
+      $("drop").addEventListener(ev, e => {
+        e.preventDefault();
+        $("drop").classList.toggle("on", ev === "dragover");
+        if (ev === "drop") pick(e.dataTransfer.files[0]);
+      });
+    });
+
+    document.addEventListener("paste", e => {
+      const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith("image/"));
+      if (item) pick(item.getAsFile());
+    });
+
+    $("go").onclick = async () => {
+      if (!cur) return;
+      $("go").disabled = true;
+      $("drop").classList.add("scanning");
+      $("statusBar").classList.remove("error");
+      $("status").textContent = "Scanning with AayoLens (OCR + AI verification)…";
+
+      const fd = new FormData();
+      fd.append("file", cur);
+      try {
+        const r = await (await fetch("/api/scan", { method: "POST", body: fd })).json();
+        if (r.error) {
+          $("statusBar").classList.add("error");
+          $("status").textContent = "Error: " + r.error;
+          return;
+        }
+        $("status").textContent = "Scan complete · Ready to review or copy";
+        render(r);
+      } catch (e) {
+        $("statusBar").classList.add("error");
+        $("status").textContent = "Scan failed: " + e.message;
+      } finally {
+        $("drop").classList.remove("scanning");
+        $("go").disabled = false;
+      }
+    };
+
+    function render(r) {
+      const f = r.fields || {}, v = r.validation || {};
+      $("chips").style.display = "flex";
+      $("chips").innerHTML =
+        `<span class="chip ok">OCR ${esc(r.ocr_confidence)}%</span>` +
+        `<span class="chip ${r.ai_used ? "ok" : ""}">AI: ${r.ai_used ? "Verified" : "Off" + (r.ai_error ? " (" + esc(r.ai_error) + ")" : "")}</span>` +
+        (f.doc_type ? `<span class="chip">${esc(f.doc_type)}</span>` : "");
+
+      const list = document.createElement("div");
+      list.className = "field-list";
+
+      for (const k of Object.keys(LABELS)) {
+        if (f[k] == null || f[k] === "") continue;
+        const row = document.createElement("div");
+        row.className = "row";
+
+        const lbl = document.createElement("label");
+        lbl.textContent = LABELS[k];
+
+        const long = k === "address" || k === "summary";
+        const inp = document.createElement(long ? "textarea" : "input");
+        if (long) inp.rows = 3;
+        inp.value = String(f[k]);
+        inp.dataset.fieldKey = k;
+
+        const vv = v[VKEY[k]];
+        const badge = document.createElement("span");
+        if (vv) {
+          badge.className = `badge ${vv.ok ? "ok" : "bad"}`;
+          badge.title = vv.note;
+          badge.textContent = vv.ok ? "✓" : "✕";
+        } else {
+          badge.className = "badge";
+        }
+
+        const cbtn = document.createElement("button");
+        cbtn.type = "button";
+        cbtn.className = "icon-copy";
+        cbtn.title = `Copy ${LABELS[k]}`;
+        cbtn.innerHTML = COPY_SVG;
+        cbtn.onclick = () => copyText(inp.value, cbtn, COPY_SVG);
+
+        row.append(lbl, inp, badge, cbtn);
+        list.appendChild(row);
+      }
+
+      $("out").innerHTML = "";
+      if (!list.children.length) {
+        $("out").innerHTML = '<div class="empty-state">No structured fields detected. Check the extracted text below.</div>';
+        $("copySummaryBtn").style.display = "none";
+      } else {
+        $("out").appendChild(list);
+        $("copySummaryBtn").style.display = "inline-flex";
+      }
+
+      if (f.corrections && f.corrections.length) {
+        const corr = document.createElement("div");
+        corr.className = "meta";
+        corr.textContent = "AI corrections: " + f.corrections.join("; ");
+        $("out").appendChild(corr);
+      }
+
+      $("textPanel").style.display = "block";
+      $("raw").value = r.raw_text || "";
+      $("copyRawBtn").disabled = !($("raw").value.trim());
+    }
+
+    $("copyRawBtn").onclick = () => copyText($("raw").value, $("copyRawBtn"), COPY_SVG + " Copy Text");
+    $("copySummaryBtn").onclick = () => {
+      const lines = [...$("out").querySelectorAll("[data-field-key]")].map(el => {
+        const label = LABELS[el.dataset.fieldKey] || el.dataset.fieldKey;
+        return `${label}: ${el.value}`;
+      });
+      copyText(lines.join("\n"), $("copySummaryBtn"), "Copy Fields");
+    };
+  </script>
+</body>
+</html>

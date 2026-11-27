@@ -1,0 +1,39 @@
+# Render Blueprint (assumes `doclens/` is the repository root;
+# if the parent `Aayo Lens/` folder is the repo root, set rootDir to `doclens` and `doclens/server`)
+services:
+  - type: web
+    name: aayolens-ocr
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: OCR_LANGS
+        value: eng+hin+mar
+      - key: OCR_TOKEN
+        generateValue: true
+
+  - type: web
+    name: aayolens-portal
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: OCR_URL
+        sync: false
+      - key: OCR_TOKEN
+        fromService:
+          type: web
+          name: aayolens-ocr
+          envVarKey: OCR_TOKEN
+      - key: ENC_KEY
+        sync: false
