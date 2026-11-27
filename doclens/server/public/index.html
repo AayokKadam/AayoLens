@@ -913,6 +913,7 @@
       }
       $("who").textContent = localStorage.name || "Signed in";
       tab("scan");
+      fetch("/api/warmup", { headers: { Authorization: "Bearer " + tok } }).catch(() => {});
     }
 
     function tab(t) {

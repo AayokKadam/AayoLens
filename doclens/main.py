@@ -78,47 +78,46 @@ def decode_image_bytes(data: bytes) -> np.ndarray | None:
 
 
 def normalize_size(img: np.ndarray) -> np.ndarray:
-    """Keep longest edge in [1800, 2400] px for accurate OCR without excessive CPU/RAM."""
+    """Keep longest edge in [1600, 1900] px for fast, sharp OCR on CPU-constrained hosts."""
     h, w = img.shape[:2]
     longest = max(h, w)
-    if longest < 1800:
-        s = 1800 / longest
+    if longest < 1600:
+        s = 1600 / longest
         return cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_CUBIC)
-    if longest > 2400:
-        s = 2400 / longest
+    if longest > 1900:
+        s = 1900 / longest
         return cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
     return img
 
 
-def auto_rotate_osd(gray: np.ndarray) -> np.ndarray:
-    """Rotate 90/180/270 degrees if Tesseract OSD detects an upside-down/sideways page."""
+def auto_rotate_osd(gray: np.ndarray) -> tuple[np.ndarray, bool]:
+    """Rotate 90/180/270 degrees if Tesseract OSD detects a rotated page; returns (img, changed)."""
     if not HAS_OSD:
-        return gray
+        return gray, False
     h, w = gray.shape[:2]
     probe = gray
-    if max(h, w) > 1400:
-        s = 1400 / max(h, w)
+    if max(h, w) > 1200:
+        s = 1200 / max(h, w)
         probe = cv2.resize(gray, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
     try:
         osd = pytesseract.image_to_osd(probe, output_type=pytesseract.Output.DICT)
         rot = int(osd.get("rotate", 0))
         conf = float(osd.get("orientation_conf", 0))
     except Exception:
-        return gray
-    if conf < 2.0:
-        return gray
+        return gray, False
+    if conf < 2.0 or rot == 0:
+        return gray, False
     if rot == 90:
-        return cv2.rotate(gray, cv2.ROTATE_90_CLOCKWISE)
+        return cv2.rotate(gray, cv2.ROTATE_90_CLOCKWISE), True
     if rot == 180:
-        return cv2.rotate(gray, cv2.ROTATE_180)
+        return cv2.rotate(gray, cv2.ROTATE_180), True
     if rot == 270:
-        return cv2.rotate(gray, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    return gray
+        return cv2.rotate(gray, cv2.ROTATE_90_COUNTERCLOCKWISE), True
+    return gray, False
 
 
 def deskew(g: np.ndarray) -> np.ndarray:
     """Correct small camera tilt (-12 to +12 deg) using text-mask coordinates."""
-    # Use adaptive foreground mask so dark borders/backgrounds don't skew angle estimation
     edges = cv2.Canny(g, 50, 150)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 3))
     dilated = cv2.dilate(edges, kernel, iterations=1)
@@ -141,75 +140,102 @@ def deskew(g: np.ndarray) -> np.ndarray:
     return cv2.warpAffine(g, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 
 
-def preprocess_variants(img: np.ndarray) -> list[np.ndarray]:
-    """Produce complementary grayscale/threshold variants for cards, scans, and photos."""
-    scaled = normalize_size(img)
-    gray = cv2.cvtColor(scaled, cv2.COLOR_BGR2GRAY)
-    gray = auto_rotate_osd(gray)
-    gray = deskew(gray)
-
-    # 1. CLAHE + light bilateral filter (preserves strokes on colored/textured IDs like PAN/Aadhaar)
-    clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8)).apply(gray)
-    smooth = cv2.bilateralFilter(clahe, 7, 45, 45)
-
-    # 2. Otsu binary (sharp for clean scans and digital screenshots)
+def _build_variants(gray: np.ndarray) -> list[np.ndarray]:
+    """Produce fast complementary grayscale/threshold variants from a deskewed grayscale image."""
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
     blur = cv2.GaussianBlur(gray, (3, 3), 0)
     _, otsu = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    # 3. Adaptive Gaussian threshold (handles uneven phone shadows/glare)
     adapt = cv2.adaptiveThreshold(
-        smooth, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 11
+        clahe, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 11
     )
-    return [smooth, otsu, adapt]
+    return [clahe, otsu, adapt]
 
 
-def _score_ocr_data(data: dict) -> tuple[float, float, int]:
-    """Score OCR pass by mean confidence weighted with readable character yield."""
+def _data_to_text_and_score(data: dict) -> tuple[str, float, float, int]:
+    """Reconstruct formatted text and compute weighted score in one pass without calling Tesseract twice."""
     confs = []
     alnum_chars = 0
-    for txt, c in zip(data.get("text", []), data.get("conf", [])):
+    blocks: dict[tuple[int, int, int], list[str]] = {}
+
+    texts = data.get("text", [])
+    raw_confs = data.get("conf", [])
+    b_nums = data.get("block_num", [0] * len(texts))
+    p_nums = data.get("par_num", [0] * len(texts))
+    l_nums = data.get("line_num", [0] * len(texts))
+
+    for txt, c, b, p, l in zip(texts, raw_confs, b_nums, p_nums, l_nums):
+        word = str(txt).strip()
+        if not word:
+            continue
         try:
             cf = float(c)
         except (TypeError, ValueError):
-            continue
-        cleaned = re.sub(r"[^A-Za-z0-9\u0900-\u097F]", "", str(txt))
+            cf = -1.0
+        blocks.setdefault((int(b), int(p), int(l)), []).append(word)
+        cleaned = re.sub(r"[^A-Za-z0-9\u0900-\u097F]", "", word)
         if cf >= 0 and cleaned:
             confs.append(cf)
             alnum_chars += len(cleaned)
+
+    lines_out = []
+    prev_block = None
+    for (b, _p, _l), words in blocks.items():
+        if prev_block is not None and b != prev_block:
+            lines_out.append("")
+        lines_out.append(" ".join(words))
+        prev_block = b
+
+    full_text = "\n".join(lines_out).strip()
     if not confs:
-        return -1.0, 0.0, 0
+        return full_text, -1.0, 0.0, 0
     mean_conf = sum(confs) / len(confs)
     yield_factor = min(alnum_chars, 80) / 80.0
     score = mean_conf * (0.45 + 0.55 * yield_factor)
-    return score, mean_conf, alnum_chars
+    return full_text, score, mean_conf, alnum_chars
+
+
+def _run_ocr_pass(img_gray: np.ndarray, psm: int) -> tuple[str, float, float, int]:
+    data = pytesseract.image_to_data(
+        img_gray, lang=LANGS, config=f"--oem 3 --psm {psm}", output_type=pytesseract.Output.DICT
+    )
+    return _data_to_text_and_score(data)
 
 
 def ocr_image(img: np.ndarray) -> tuple[str, float]:
-    best_score, best_conf, best_img, best_psm = -1.0, 0.0, None, 3
-    variants = preprocess_variants(img)
+    scaled = normalize_size(img)
+    gray = cv2.cvtColor(scaled, cv2.COLOR_BGR2GRAY)
+    gray = deskew(gray)
+    variants = _build_variants(gray)
 
-    for v in variants:
-        data = pytesseract.image_to_data(
-            v, lang=LANGS, config="--oem 3 --psm 3", output_type=pytesseract.Output.DICT
-        )
-        score, conf, chars = _score_ocr_data(data)
-        if score > best_score:
-            best_score, best_conf, best_img, best_psm = score, conf, v, 3
+    # Fast primary pass (single Tesseract call covers clean scans/screenshots/clear cards)
+    best_text, best_score, best_conf, best_chars = _run_ocr_pass(variants[0], 3)
 
-    # Fallback: sparse/noisy ID cards sometimes read much cleaner with --psm 6 or --psm 11
-    if best_img is None or best_conf < 68 or best_score < 45:
+    # Lazy OSD check only when primary pass looks rotated/garbled
+    if best_conf < 58 or best_chars < 15:
+        rotated, changed = auto_rotate_osd(gray)
+        if changed:
+            gray = deskew(rotated)
+            variants = _build_variants(gray)
+            t, s, c, ch = _run_ocr_pass(variants[0], 3)
+            if s > best_score:
+                best_text, best_score, best_conf, best_chars = t, s, c, ch
+
+    # Only try additional thresholding / PSM passes if primary pass wasn't already strong
+    if best_conf < 85 or best_chars < 25:
+        for v in variants[1:]:
+            t, s, c, ch = _run_ocr_pass(v, 3)
+            if s > best_score:
+                best_text, best_score, best_conf, best_chars = t, s, c, ch
+            if best_conf >= 86 and best_chars >= 30:
+                break
+
+    if best_conf < 65 or best_score < 45:
         for psm in (6, 11):
-            data = pytesseract.image_to_data(
-                variants[0], lang=LANGS, config=f"--oem 3 --psm {psm}", output_type=pytesseract.Output.DICT
-            )
-            score, conf, _ = _score_ocr_data(data)
-            if score > best_score:
-                best_score, best_conf, best_img, best_psm = score, conf, variants[0], psm
+            t, s, c, ch = _run_ocr_pass(variants[0], psm)
+            if s > best_score:
+                best_text, best_score, best_conf, best_chars = t, s, c, ch
 
-    if best_img is None:
-        return "", 0.0
-    text = pytesseract.image_to_string(best_img, lang=LANGS, config=f"--oem 3 --psm {best_psm}")
-    return text.strip(), round(best_conf, 1)
+    return best_text, round(best_conf, 1)
 
 
 def read_pdf(data: bytes) -> tuple[str, float]:
@@ -252,12 +278,17 @@ def valid_calendar_date(dd: int, mm: int, yyyy: int) -> bool:
 def fix_pan(tok: str) -> tuple[str, int] | None:
     """Attempt OCR-confusion normalization on a 10-char PAN candidate; return (pan, edit_count)."""
     raw = re.sub(r"\s+", "", tok).upper()
-    if len(raw) != 10:
+    if len(raw) != 10 or raw.isalpha():
+        return None
+    # Require at least 2 real digits in the 4-digit middle block to avoid English words
+    if sum(ch.isdigit() for ch in raw[5:9]) < 2:
         return None
     fixed = raw[:5].translate(TO_ALPHA) + raw[5:9].translate(TO_DIGIT) + raw[9].translate(TO_ALPHA)
     if not re.fullmatch(r"[A-Z]{5}\d{4}[A-Z]", fixed):
         return None
     edits = sum(a != b for a, b in zip(raw, fixed))
+    if edits > 3:
+        return None
     return fixed, edits
 
 

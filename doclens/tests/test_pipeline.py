@@ -41,6 +41,9 @@ class TestAayoLensPipeline(unittest.TestCase):
         self.assertEqual(res["pincode"], "400001")
 
     def test_pan_extraction_avoids_words_and_fixes_split_ocr(self):
+        # 10-letter English words like DISCUSSION / COMMISSION must never become fake PANs
+        self.assertNotIn("pan_number", doclens.rule_extract("Rate card discussion, commission, submission"))
+
         text = "INCOME TAX DEPARTMENT\nGOVT OF INDIA\nPermanent Account Number\nABCPB 1234F"
         res = doclens.rule_extract(text)
         self.assertEqual(res["pan_number"], "ABCPB1234F")

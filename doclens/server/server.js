@@ -77,6 +77,18 @@ const sign = (u) => jwt.sign({ id: u._id }, JWT_SECRET, { expiresIn: '7d' });
 const auth = (req, res, next) => { try { req.uid = jwt.verify((req.headers.authorization || '').replace('Bearer ', ''), JWT_SECRET).id; next(); }
   catch { res.status(401).json({ error: 'Please log in' }); } };
 
+app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'aayolens-portal' }));
+
+app.get('/api/warmup', auth, async (_req, res) => {
+  try {
+    const healthUrl = new URL('/health', OCR_URL).toString();
+    const r = await fetch(healthUrl, { signal: AbortSignal.timeout(55000) });
+    res.json({ ok: r.ok });
+  } catch {
+    res.json({ ok: false });
+  }
+});
+
 app.post('/api/auth/register', wrap(async (req, res) => {
   const { name, email, password } = req.body || {};
   if (!email || !password || password.length < 6) return res.status(400).json({ error: 'Email and 6+ char password required' });
@@ -101,7 +113,7 @@ app.post('/api/scan', auth, upload.single('file'), wrap(async (req, res) => {
       method: 'POST',
       body: fd,
       headers: { 'x-ocr-token': process.env.OCR_TOKEN || '' },
-      signal: AbortSignal.timeout(45000),
+      signal: AbortSignal.timeout(120000),
     });
     if (!resp.ok) {
       const msg = await resp.text();

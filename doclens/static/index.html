@@ -673,10 +673,11 @@
       const fd = new FormData();
       fd.append("file", cur);
       try {
-        const r = await (await fetch("/api/scan", { method: "POST", body: fd })).json();
-        if (r.error) {
+        const resp = await fetch("/api/scan", { method: "POST", body: fd });
+        const r = await resp.json().catch(() => ({}));
+        if (!resp.ok || r.error) {
           $("statusBar").classList.add("error");
-          $("status").textContent = "Error: " + r.error;
+          $("status").textContent = "Error: " + (r.error || r.detail || `HTTP ${resp.status}`);
           return;
         }
         $("status").textContent = "Scan complete · Ready to review or copy";
